@@ -47,7 +47,9 @@
     - `document.querySelector('.form-footer-butt[href*="pid=目标ID"]')`
     - `document.querySelector('[data-id="目标ID"] .form-footer-butt')`
     - `document.querySelector('a[href*="gid=目标ID"]')`
-  - 若页面使用了不同的 DOM 结构，提供该商品块的 HTML 片段以便适配。
+
+
+- 有时候购物车会产生重复订单，这时需要人工手动删除，直到剩下一个，然后直接到支付页开脚本等着
 
 ---
 
