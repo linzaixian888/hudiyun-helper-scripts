@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         狐蒂云自动抢购
 // @namespace    http://tampermonkey.net/
-// @version      1.1.2
+// @version      1.1.3
 // @description  进入支付页或购物车提交后暂停，支持缩放到侧栏，含抢购时间提示，新增重复提交选项，自动关闭弹窗
 // @match        https://www.szhdy.com/*
 // @grant        none
@@ -166,48 +166,52 @@
     return null;
   };
 
-  // 参考识别脚本：判断页面是否为有效商品配置页（避免误判为错误页）
-  const isLikelyProductPage = () => {
+  // 基于本仓库提供的页面快照，判定“页面是否为正常的操作页（购物车/配置/商品列表）”
+  const isValidPageContent = () => {
     try {
-      const productName = document.querySelector('.allocation-header-title h1');
-      const hasProductName = !!(productName && productName.textContent.trim().length > 0);
-      const hasOsCard = document.querySelector('.os-card') !== null;
-      const hasCycleButtons = document.querySelector('.sky-btn-group.btn-group-toggle');
-      const hasCycleOptions = !!(hasCycleButtons && hasCycleButtons.children.length > 0);
-      const hasConfigOptions = document.querySelectorAll('.sky-config-btn').length > 0;
-      const hasConfigArea = document.querySelector('.configureproduct') !== null;
-      const btnBuyNow = document.querySelector('.btn-buyNow');
-      const hasBuyButton = !!(btnBuyNow && btnBuyNow.textContent.trim().length > 0);
-
-      const hasProductInfo = hasProductName || hasOsCard || (hasConfigArea && (hasCycleOptions || hasConfigOptions));
-      if (hasProductInfo && hasBuyButton) return true;
-      if (hasProductInfo) return true;
-      return false;
-    } catch {
-      return false;
-    }
-  };
-
-  // 检测HTTP错误状态（通过页面标题/内容特征）
-  const detectHttpError = () => {
-    try {
-      // 若页面明显是有效商品页，直接视为正常，避免误判
-      if (isLikelyProductPage()) return null;
-      // 仅基于 HTML 文本特征检测 404/502（不检测标题、不检测其他码）
-      const bodyText = (document.body.innerText || document.body.textContent || '').trim();
-      // 判断购物车/配置等关键UI是否存在，用于避免“有UI但含关键字”的误判
-      const hasCartUI = !!(document.querySelector('.submit-btn')
+      // 购物车/结算相关关键元素
+      const hasCartUI = document.querySelector('.submit-btn')
         || document.querySelector('.payment-checkbox')
         || document.querySelector('.sky-viewcart-terms-checkbox')
         || document.querySelector('.nextStep')
         || document.querySelector('.ordersummarybottom-title')
         || document.querySelector('.viewcart')
-        || document.querySelector('.sky-cart-menu-item'));
+        || document.querySelector('.sky-cart-menu-item');
 
-      // 502：页面空空（无关键UI）且包含明确的 502 文本标志
-      if (!hasCartUI && /\b502\b|Bad\s*Gateway/i.test(bodyText)) return '502';
-      // 404：页面空空（无关键UI）且包含明确的 404 文本标志
-      if (!hasCartUI && /\b404\b|Not\s*Found|抱歉找不到页面/i.test(bodyText)) return '404';
+      if (hasCartUI) return true;
+
+      // 配置/商品页常见元素
+      const hasProductConfigUI = document.querySelector('.configureproduct')
+        || document.querySelector('.btn-buyNow')
+        || document.querySelector('.allocation-header-title h1')
+        || document.querySelector('.os-card')
+        || document.querySelector('[data-id] .form-footer-butt')
+        || document.querySelector('a.form-footer-butt')
+        || document.querySelector('a[href*="pid="]')
+        || document.querySelector('a[href*="gid="]');
+
+      return !!hasProductConfigUI;
+    } catch {
+      return false;
+    }
+  };
+
+  // 仅针对本地特征（404/502）的HTML错误页检测：要求“页面空空且有明确标志”
+  const detectHtmlError404or502 = () => {
+    try {
+      // 页面空空：无购物车/配置等关键UI
+      const hasUI = isValidPageContent();
+      if (hasUI) return null;
+      // 仅基于 HTML 文本特征检测 404/502（不检测标题、不检测其他码）
+      const bodyText = (document.body.innerText || document.body.textContent || '').trim();
+      // 502：空页面并且包含 502 Bad Gateway 或 Tengine 的提示
+      if (/\b502\b|Bad\s*Gateway/i.test(bodyText) || /Powered\s+by\s+Tengine/i.test(bodyText)) {
+        return '502';
+      }
+      // 404：空页面并且包含 Not Found 或“抱歉找不到页面”
+      if (/\b404\b|Not\s*Found|抱歉找不到页面/i.test(bodyText)) {
+        return '404';
+      }
       return null;
     } catch {
       return null;
@@ -846,12 +850,12 @@
 
     // HTTP错误自动重试：仅在“启用 + 非支付页 + 运行中”时检查，暂停时不触发
     if (config.enableHttpRetry && !isPaymentPage() && isRunning) {
-      const httpError = detectHttpError();
-      if (httpError) {
+      const htmlError = detectHtmlError404or502();
+      if (htmlError) {
         const current = loadRetryCount();
         if (current < (config.httpRetryMax || 5)) {
           saveRetryCount(current + 1);
-          updatePanel("错误重试中", `检测到HTTP错误(${httpError})，${current + 1}/${config.httpRetryMax} 次，等待后刷新...`);
+          updatePanel("错误重试中", `检测到页面错误(${htmlError})，${current + 1}/${config.httpRetryMax} 次，等待后刷新...`);
           setTimeout(() => location.reload(), config.checkInterval);
           return;
         } else {
@@ -864,7 +868,7 @@
             toggle.textContent = "开始";
             toggle.className = "hud-btn toggle status-paused";
           }
-          updatePanel("已暂停", `HTTP错误(${httpError}) 重试超过${config.httpRetryMax}次，已自动暂停`);
+          updatePanel("已暂停", `页面错误(${htmlError}) 重试超过${config.httpRetryMax}次，已自动暂停`);
           return;
         }
       } else {
