@@ -150,7 +150,7 @@ https://www.szhdy.com/cart?action=configureproduct&pid=1859
 1949 新加坡1区|精品网络| 32H系列 ¥350.00<br>
 1950 三周年 北京BGP3区-16H16G ¥333.00<br>
 </details>
-11.17最后一波更新
+11.17三周年最后一波更新
 
 
 ### 自动抢购.js（后运行）
